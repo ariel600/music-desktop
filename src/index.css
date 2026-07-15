@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: "Heebo", "Segoe UI", Tahoma, Arial, sans-serif;
+  --color-background: #e8f3f2;
+  --color-foreground: #134e4a;
+}
+
+html,
+body,
+#root {
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "kern" 1;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Prevent flex/grid children from overflowing the viewport shell */
+.app-shell {
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+}
