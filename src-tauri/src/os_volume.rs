@@ -126,11 +126,12 @@ fn unlock_external_audio() -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 mod win {
+    use std::ptr;
     use windows::core::Interface;
+    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
-        eConsole, eMultimedia, eRender, ERole, IAudioEndpointVolume, IAudioSessionControl2,
-        IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume,
-        MMDeviceEnumerator,
+        eConsole, eMultimedia, eRender, ERole, IAudioSessionControl2, IAudioSessionManager2,
+        IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator,
     };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
@@ -166,9 +167,11 @@ mod win {
                 .Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)
                 .map_err(|e| e.to_string())?;
             volume
-                .SetMasterVolumeLevelScalar(level, None)
+                .SetMasterVolumeLevelScalar(level, ptr::null())
                 .map_err(|e| e.to_string())?;
-            volume.SetMute(false, None).map_err(|e| e.to_string())?;
+            volume
+                .SetMute(false, ptr::null())
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -217,18 +220,18 @@ mod win {
 
                 if pid == our_pid {
                     // Keep our own streams audible at full session volume.
-                    let _ = volume.SetMute(false, None);
-                    let _ = volume.SetMasterVolume(1.0, None);
+                    let _ = volume.SetMute(false, ptr::null());
+                    let _ = volume.SetMasterVolume(1.0, ptr::null());
                     continue;
                 }
 
                 if mute_others {
-                    let _ = volume.SetMute(true, None);
-                    let _ = volume.SetMasterVolume(0.0, None);
+                    let _ = volume.SetMute(true, ptr::null());
+                    let _ = volume.SetMasterVolume(0.0, ptr::null());
                 } else {
-                    let _ = volume.SetMute(false, None);
+                    let _ = volume.SetMute(false, ptr::null());
                     // Restore a usable session level; apps keep their own mixer prefs.
-                    let _ = volume.SetMasterVolume(1.0, None);
+                    let _ = volume.SetMasterVolume(1.0, ptr::null());
                 }
             }
         }
