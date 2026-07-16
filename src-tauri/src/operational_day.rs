@@ -1,4 +1,10 @@
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveTime, Timelike, Weekday};
+use chrono::{
+    DateTime, Datelike, Duration, Local, NaiveDate, NaiveTime, TimeZone, Timelike, Utc, Weekday,
+};
+
+const JERUSALEM_LATITUDE: f64 = 31.7683;
+const JERUSALEM_LONGITUDE: f64 = 35.2137;
+const OFFICIAL_SUNSET_ZENITH: f64 = 90.833;
 
 pub fn operational_date(now: DateTime<Local>) -> NaiveDate {
     let date = now.date_naive();
@@ -17,6 +23,67 @@ pub fn operational_weekday(now: DateTime<Local>) -> u8 {
     operational_date(now)
         .weekday()
         .num_days_from_sunday() as u8
+}
+
+fn normalize(value: f64, modulus: f64) -> f64 {
+    ((value % modulus) + modulus) % modulus
+}
+
+fn jerusalem_sunset_utc(date: NaiveDate) -> Option<DateTime<Utc>> {
+    let day = date.ordinal() as f64;
+    let longitude_hour = JERUSALEM_LONGITUDE / 15.0;
+    let approximate_time = day + (18.0 - longitude_hour) / 24.0;
+    let mean_anomaly = 0.9856 * approximate_time - 3.289;
+    let true_longitude = normalize(
+        mean_anomaly
+            + 1.916 * mean_anomaly.to_radians().sin()
+            + 0.020 * (2.0 * mean_anomaly).to_radians().sin()
+            + 282.634,
+        360.0,
+    );
+
+    let mut right_ascension =
+        (0.91764 * true_longitude.to_radians().tan()).atan().to_degrees();
+    right_ascension = normalize(right_ascension, 360.0);
+    right_ascension += (true_longitude / 90.0).floor() * 90.0
+        - (right_ascension / 90.0).floor() * 90.0;
+    right_ascension /= 15.0;
+
+    let sin_declination = 0.39782 * true_longitude.to_radians().sin();
+    let cos_declination = sin_declination.asin().cos();
+    let cosine_hour_angle = (OFFICIAL_SUNSET_ZENITH.to_radians().cos()
+        - sin_declination * JERUSALEM_LATITUDE.to_radians().sin())
+        / (cos_declination * JERUSALEM_LATITUDE.to_radians().cos());
+    if !(-1.0..=1.0).contains(&cosine_hour_angle) {
+        return None;
+    }
+
+    let hour_angle = cosine_hour_angle.acos().to_degrees() / 15.0;
+    let local_mean_time =
+        hour_angle + right_ascension - 0.06571 * approximate_time - 6.622;
+    let utc_hours = normalize(local_mean_time - longitude_hour, 24.0);
+    let seconds = (utc_hours * 3600.0).round() as i64;
+    let midnight = date.and_hms_opt(0, 0, 0)?;
+    Some(Utc.from_utc_datetime(&(midnight + Duration::seconds(seconds))))
+}
+
+/// Gregorian row whose Hebrew date is in effect in Jerusalem. The Hebrew day
+/// advances at astronomical sunset while the civil/operational date is kept
+/// separate.
+fn hebrew_date_for_instant(civil_date: NaiveDate, now_utc: DateTime<Utc>) -> NaiveDate {
+    match jerusalem_sunset_utc(civil_date) {
+        Some(sunset) if now_utc >= sunset => civil_date + Duration::days(1),
+        _ => civil_date,
+    }
+}
+
+pub fn hebrew_date(now: DateTime<Local>) -> NaiveDate {
+    let civil_date = now.date_naive();
+    hebrew_date_for_instant(civil_date, now.with_timezone(&Utc))
+}
+
+pub fn hebrew_date_string(now: DateTime<Local>) -> String {
+    hebrew_date(now).format("%Y-%m-%d").to_string()
 }
 
 /// Map a scheduled `HH:MM` belonging to an operational day onto a wall-clock datetime.
@@ -125,5 +192,36 @@ mod tests {
         assert!(!is_israel_summer_on_date(
             NaiveDate::from_ymd_opt(2026, 10, 25).unwrap()
         )); // last Sunday of October
+    }
+
+    #[test]
+    fn jerusalem_sunset_is_in_expected_utc_range() {
+        let summer = jerusalem_sunset_utc(
+            NaiveDate::from_ymd_opt(2026, 7, 16).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(summer.date_naive(), NaiveDate::from_ymd_opt(2026, 7, 16).unwrap());
+        assert!((16..=17).contains(&summer.hour()));
+
+        let winter = jerusalem_sunset_utc(
+            NaiveDate::from_ymd_opt(2026, 12, 16).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(winter.date_naive(), NaiveDate::from_ymd_opt(2026, 12, 16).unwrap());
+        assert!((14..=15).contains(&winter.hour()));
+    }
+
+    #[test]
+    fn hebrew_date_changes_exactly_at_jerusalem_sunset() {
+        let civil = NaiveDate::from_ymd_opt(2026, 7, 16).unwrap();
+        let sunset = jerusalem_sunset_utc(civil).unwrap();
+        assert_eq!(
+            hebrew_date_for_instant(civil, sunset - Duration::seconds(1)),
+            civil
+        );
+        assert_eq!(
+            hebrew_date_for_instant(civil, sunset),
+            civil + Duration::days(1)
+        );
     }
 }

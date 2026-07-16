@@ -61,9 +61,10 @@ fn count_system_messages_for_today(db: &DbState) -> Result<u64, String> {
     let now = Local::now();
     let operational_date = operational_day::operational_date_string(now);
     let weekday = operational_day::operational_weekday(now);
+    let hebrew_date = operational_day::hebrew_date_string(now);
     let operating_hours = db.get_operating_hours().map_err(|e| e.to_string())?;
     let holiday = db
-        .get_holiday_day(&operational_date)
+        .get_holiday_day(&hebrew_date)
         .map_err(|e| e.to_string())?;
     let holiday_ref = holiday.as_ref();
     let tomorrow_is_erev =
@@ -111,9 +112,10 @@ fn resolve_hours(db: &DbState) -> Result<OverviewHours, String> {
     let now = Local::now();
     let operational_date = operational_day::operational_date_string(now);
     let weekday = operational_day::operational_weekday(now);
+    let hebrew_date = operational_day::hebrew_date_string(now);
     let settings = db.get_operating_hours().map_err(|e| e.to_string())?;
     let holiday = db
-        .get_holiday_day(&operational_date)
+        .get_holiday_day(&hebrew_date)
         .map_err(|e| e.to_string())?;
 
     let Some(hours) = system_message_schedule::resolve_day_hours(
@@ -148,8 +150,8 @@ fn scheduled_music_folder(db: &DbState) -> Option<String> {
     let holidays = holiday_service::get_holidays_list(db).ok()?;
     let settings = db.get_operating_hours().ok()?;
     let now = Local::now();
-    let operational_date = operational_day::operational_date_string(now);
-    let holiday = db.get_holiday_day(&operational_date).ok().flatten();
+    let hebrew_date = operational_day::hebrew_date_string(now);
+    let holiday = db.get_holiday_day(&hebrew_date).ok().flatten();
     let (_in_window, decision) =
         music_schedule::resolve_today(&holidays, &settings, holiday.as_ref());
     decision.slug().map(str::to_string)

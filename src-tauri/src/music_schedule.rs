@@ -190,18 +190,53 @@ fn resolve_seasonal(date: NaiveDate, holidays: &[HolidayEntry]) -> &'static str 
     FOLDER_GENERAL
 }
 
-fn resolve_vocal(date: NaiveDate, holidays: &[HolidayEntry]) -> Option<&'static str> {
-    let tisha_dates = dates_for_groups(holidays, &["תשעה באב"]);
-    let mut av10_dates = dates_for_groups(holidays, &["י אב", "י׳ אב", "י' אב"]);
-    for tisha in &tisha_dates {
-        av10_dates.push(*tisha + Duration::days(1));
-    }
-    av10_dates.sort();
-    av10_dates.dedup();
-    if av10_dates.contains(&date) {
-        return Some(FOLDER_BEIN_HAMETZARIM);
-    }
+/// תשעה באב = ט׳ באב. ב׳ באב = 7 ימים לפני, י׳ באב = יום אחרי.
+fn tisha_bav_dates(holidays: &[HolidayEntry]) -> Vec<NaiveDate> {
+    dates_for_groups(holidays, &["תשעה באב"])
+}
 
+fn av10_dates(holidays: &[HolidayEntry]) -> Vec<NaiveDate> {
+    let mut dates = dates_for_groups(holidays, &["י אב", "י׳ אב", "י' אב"]);
+    for tisha in tisha_bav_dates(holidays) {
+        dates.push(tisha + Duration::days(1));
+    }
+    dates.sort();
+    dates.dedup();
+    dates
+}
+
+/// No music from ב׳ באב through the end of י׳ באב (inclusive).
+fn is_av_silence_period(
+    date: NaiveDate,
+    holiday: Option<&HolidayEntry>,
+    holidays: &[HolidayEntry],
+) -> bool {
+    if holiday.is_some_and(|h| {
+        name_matches(&h.holiday_group, &["תשעה באב"])
+            || name_matches(&h.title, &["תשעה באב"])
+            || name_matches(&h.holiday_group, &["י אב", "י׳ אב", "י' אב"])
+            || name_matches(&h.title, &["י אב", "י׳ אב", "י' אב"])
+    }) {
+        return true;
+    }
+    if av10_dates(holidays).contains(&date) {
+        return true;
+    }
+    for tisha in tisha_bav_dates(holidays) {
+        let av2 = tisha - Duration::days(7);
+        let av10 = tisha + Duration::days(1);
+        if in_inclusive(date, av2, av10) {
+            return true;
+        }
+    }
+    false
+}
+
+fn resolve_vocal(date: NaiveDate, holidays: &[HolidayEntry]) -> Option<&'static str> {
+    let tisha_dates = tisha_bav_dates(holidays);
+
+    // בין המצרים ווקאלי: מי״ז בתמוז עד א׳ באב (יום לפני ב׳ באב).
+    // מב׳ באב עד י׳ באב — שתיקה מלאה (ראה is_av_silence_period).
     let mut tammuz_17 = dates_for_groups(holidays, &["יז בתמוז", "י״ז בתמוז", "י\"ז בתמוז"]);
     if tammuz_17.is_empty() {
         for tisha in &tisha_dates {
@@ -210,7 +245,8 @@ fn resolve_vocal(date: NaiveDate, holidays: &[HolidayEntry]) -> Option<&'static 
     }
     for start in tammuz_17 {
         if let Some(&tisha) = tisha_dates.iter().find(|&&t| t >= start) {
-            if in_inclusive(date, start, tisha - Duration::days(1)) {
+            let av1 = tisha - Duration::days(8); // ט׳ באב − 8 = א׳ באב
+            if in_inclusive(date, start, av1) {
                 return Some(FOLDER_BEIN_HAMETZARIM);
             }
         }
@@ -248,10 +284,7 @@ pub fn resolve_music_folder(
     holiday: Option<&HolidayEntry>,
     holidays: &[HolidayEntry],
 ) -> MusicFolderDecision {
-    if holiday.is_some_and(|h| {
-        name_matches(&h.holiday_group, &["תשעה באב"]) || name_matches(&h.title, &["תשעה באב"])
-    }) || dates_for_groups(holidays, &["תשעה באב"]).contains(&date)
-    {
+    if is_av_silence_period(date, holiday, holidays) {
         return MusicFolderDecision::Silence;
     }
 
@@ -263,6 +296,7 @@ pub fn resolve_music_folder(
         };
     }
 
+    // Vocal periods always win over the Thursday/Friday Shabbat folder.
     if let Some(vocal) = resolve_vocal(date, holidays) {
         return MusicFolderDecision::Folder {
             slug: vocal,
@@ -288,6 +322,7 @@ pub fn resolve_music_folder(
         };
     }
 
+    // Erev Shabbat / Shabbat playlist — only outside vocal periods (handled above).
     if weekday == 4 || weekday == 5 {
         return MusicFolderDecision::Folder {
             slug: FOLDER_SHABBAT,
@@ -404,9 +439,7 @@ pub fn resolve_today(
     let now = Local::now();
     let operational_date = operational_day::operational_date_string(now);
     let weekday = operational_day::operational_weekday(now);
-    let Some(date) = operational_day::parse_operational_date(&operational_date) else {
-        return (false, MusicFolderDecision::Silence);
-    };
+    let date = operational_day::hebrew_date(now);
 
     let in_window = is_in_music_window(now, &operational_date, weekday, settings, holiday);
     let decision = resolve_music_folder(date, weekday, holiday, holidays);
@@ -435,7 +468,8 @@ mod tests {
 
     #[test]
     fn thursday_uses_shabbat() {
-        let date = NaiveDate::from_ymd_opt(2026, 7, 16).unwrap();
+        // Ordinary Thursday outside any vocal/silence window.
+        let date = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
         let decision = resolve_music_folder(date, 4, None, &[]);
         assert_eq!(decision.slug(), Some(FOLDER_SHABBAT));
     }
@@ -451,6 +485,19 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
         let decision = resolve_music_folder(date, 4, None, &holidays);
         assert_eq!(decision.slug(), Some(FOLDER_SEFIRAT));
+        assert!(matches!(
+            decision,
+            MusicFolderDecision::Folder { vocal: true, .. }
+        ));
+    }
+
+    #[test]
+    fn bein_hametzarim_vocal_overrides_friday() {
+        // תשעה באב 2026-07-23 → י״ז בתמוז ≈ 2026-07-02, א׳ באב = 2026-07-15
+        let holidays = vec![holiday("2026-07-23", "תשעה באב", "חג")];
+        let friday = NaiveDate::from_ymd_opt(2026, 7, 10).unwrap(); // still before ב׳ באב
+        let decision = resolve_music_folder(friday, 5, None, &holidays);
+        assert_eq!(decision.slug(), Some(FOLDER_BEIN_HAMETZARIM));
         assert!(matches!(
             decision,
             MusicFolderDecision::Folder { vocal: true, .. }
@@ -480,6 +527,39 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 7, 23).unwrap();
         let decision = resolve_music_folder(date, 4, None, &holidays);
         assert_eq!(decision, MusicFolderDecision::Silence);
+    }
+
+    #[test]
+    fn av2_through_av10_silence() {
+        // תשעה באב = 2026-07-23 → ב׳ באב = 2026-07-16, י׳ באב = 2026-07-24
+        let holidays = vec![holiday("2026-07-23", "תשעה באב", "חג")];
+        let av2 = NaiveDate::from_ymd_opt(2026, 7, 16).unwrap();
+        let av8 = NaiveDate::from_ymd_opt(2026, 7, 22).unwrap();
+        let av10 = NaiveDate::from_ymd_opt(2026, 7, 24).unwrap();
+        assert_eq!(
+            resolve_music_folder(av2, 4, None, &holidays),
+            MusicFolderDecision::Silence
+        );
+        assert_eq!(
+            resolve_music_folder(av8, 3, None, &holidays),
+            MusicFolderDecision::Silence
+        );
+        assert_eq!(
+            resolve_music_folder(av10, 5, None, &holidays),
+            MusicFolderDecision::Silence
+        );
+    }
+
+    #[test]
+    fn av1_still_bein_hametzarim_vocal() {
+        let holidays = vec![holiday("2026-07-23", "תשעה באב", "חג")];
+        let av1 = NaiveDate::from_ymd_opt(2026, 7, 15).unwrap();
+        let decision = resolve_music_folder(av1, 2, None, &holidays);
+        assert_eq!(decision.slug(), Some(FOLDER_BEIN_HAMETZARIM));
+        assert!(matches!(
+            decision,
+            MusicFolderDecision::Folder { vocal: true, .. }
+        ));
     }
 
     #[test]

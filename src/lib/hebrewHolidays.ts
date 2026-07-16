@@ -12,10 +12,14 @@ const hebrewMonthNameFormatter = new Intl.DateTimeFormat("he-u-ca-hebrew", {
 type CalendarDayAppearance = "today" | "holiday" | "erev" | "normal";
 
 function normalizeHebrewMonth(month: string): string {
-  return month
+  const normalized = month
     .replace(/[\u0591-\u05C7]/g, "")
     .replace(/\u05F3|\u05F4/g, "")
     .trim();
+  if (normalized === "חשון") return "חשוון";
+  if (normalized === "איר") return "אייר";
+  if (normalized === "סיון") return "סיוון";
+  return normalized;
 }
 
 function getHebrewMonthName(date: Date): string {
@@ -39,6 +43,50 @@ export function getHebrewDateParts(dateStr: string): {
 export function formatHolidayHebrewDate(dateStr: string): string {
   const { day, month } = getHebrewDateParts(dateStr);
   return `${formatHebrewDay(day)} ${month}`;
+}
+
+export function formatHolidayHebrewIdentity(holiday: HolidayEntry): string {
+  const keyed = withHebrewIdentity(holiday);
+  return `${formatHebrewDay(keyed.hebrew_day!)} ${keyed.hebrew_month}`;
+}
+
+function normalizeHolidayName(value: string): string {
+  return value
+    .replace(/[\u0591-\u05C7]/g, "")
+    .replace(/[\u05F3\u05F4"']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const TECHNICAL_HOLIDAY_ANCHORS = new Set([
+  normalizeHolidayName("א׳ בסיוון"),
+  normalizeHolidayName("י״ז בתמוז"),
+  normalizeHolidayName("י׳ באב"),
+]);
+
+/** Internal calendar markers needed by music rules, not user-facing holidays. */
+export function isTechnicalHolidayAnchor(holiday: HolidayEntry): boolean {
+  if (holiday.is_custom) {
+    return false;
+  }
+  return (
+    TECHNICAL_HOLIDAY_ANCHORS.has(normalizeHolidayName(holiday.title)) ||
+    TECHNICAL_HOLIDAY_ANCHORS.has(
+      normalizeHolidayName(holiday.holiday_group),
+    )
+  );
+}
+
+/** Stable identity for a recurring holiday rule, independent of Gregorian year. */
+export function holidayRecurrenceKey(holiday: HolidayEntry): string {
+  const keyed = withHebrewIdentity(holiday);
+  return [
+    normalizeHebrewMonth(keyed.hebrew_month ?? ""),
+    keyed.hebrew_day ?? "",
+    normalizeHolidayName(keyed.holiday_group),
+    normalizeHolidayName(keyed.day_label),
+    keyed.is_custom ? "custom" : "system",
+  ].join("|");
 }
 
 const HEBREW_MONTH_SORT_KEYS: Record<string, number> = {
@@ -95,6 +143,25 @@ export function compareHolidaysByHebrewDate(
     return pa.day - pb.day;
   }
   return a.date.localeCompare(b.date);
+}
+
+export function compareHolidayRulesByHebrewDate(
+  a: HolidayEntry,
+  b: HolidayEntry,
+): number {
+  const keyedA = withHebrewIdentity(a);
+  const keyedB = withHebrewIdentity(b);
+  const monthDiff =
+    hebrewMonthSortKey(keyedA.hebrew_month ?? "") -
+    hebrewMonthSortKey(keyedB.hebrew_month ?? "");
+  if (monthDiff !== 0) {
+    return monthDiff;
+  }
+  const dayDiff = (keyedA.hebrew_day ?? 0) - (keyedB.hebrew_day ?? 0);
+  if (dayDiff !== 0) {
+    return dayDiff;
+  }
+  return dayDisplayName(a).localeCompare(dayDisplayName(b), "he");
 }
 
 function monthIs(month: string, ...candidates: string[]): boolean {

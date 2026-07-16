@@ -1435,12 +1435,13 @@ impl DbState {
         &self,
         lookback_minutes: i64,
         operational_date: &str,
+        hebrew_date: &str,
         weekday: u8,
     ) -> Result<Vec<SystemMessage>> {
         let now = Local::now();
         let window_start = now - Duration::minutes(lookback_minutes);
         let operating_hours = self.get_operating_hours()?;
-        let holiday = self.get_holiday_day(operational_date)?;
+        let holiday = self.get_holiday_day(hebrew_date)?;
         let holiday_ref = holiday.as_ref();
         let tomorrow_is_erev =
             crate::system_message_schedule::tomorrow_is_erev_chag(self, operational_date);

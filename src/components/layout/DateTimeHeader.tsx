@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatHebrewDate } from "../../lib/hebrewDate";
+import { getJerusalemHebrewDate } from "../../lib/jerusalemDate";
 
 function Clock({ date }: { date: Date }) {
   const hours = String(date.getHours()).padStart(2, "0");
@@ -52,7 +53,9 @@ export default function DateTimeHeader() {
       <Separator />
       <span className="tabular-nums">{formatGregorianDate(now)}</span>
       <Separator />
-      <span className="text-teal-100">{formatHebrewDate(now)}</span>
+      <span className="text-teal-100">
+        {formatHebrewDate(getJerusalemHebrewDate(now))}
+      </span>
     </div>
   );
 }

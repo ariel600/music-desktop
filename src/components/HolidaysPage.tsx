@@ -12,18 +12,24 @@ import type { HolidayEntry } from "../types";
 import { errMsg } from "../lib/errors";
 import {
   dayDisplayName,
-  formatHolidayDate,
   holidayIsOpen,
   isManualHoliday,
   isToday,
   normalizeHolidayStatusKind,
 } from "../lib/holidays";
-import { formatHolidayHebrewDate, compareHolidaysByHebrewDate } from "../lib/hebrewHolidays";
+import {
+  compareHolidayRulesByHebrewDate,
+  compareHolidaysByHebrewDate,
+  formatHolidayHebrewIdentity,
+  holidayRecurrenceKey,
+  isTechnicalHolidayAnchor,
+  withHebrewIdentity,
+} from "../lib/hebrewHolidays";
+import { getOperationalDate } from "../lib/operationalDay";
 
 interface HolidayListItem {
   holiday: HolidayEntry;
   name: string;
-  gregorianDate: string;
   hebrewDate: string;
   statusText: string;
   searchText: string;
@@ -107,8 +113,7 @@ function HolidayRowActionsMenu({
 
 function buildHolidayListItem(holiday: HolidayEntry): HolidayListItem {
   const name = dayDisplayName(holiday);
-  const gregorianDate = formatHolidayDate(holiday.date);
-  const hebrewDate = formatHolidayHebrewDate(holiday.date);
+  const hebrewDate = formatHolidayHebrewIdentity(holiday);
   const isOpen = holidayIsOpen(holiday);
   const statusText = isOpen
     ? holiday.open_time && holiday.close_time
@@ -121,7 +126,6 @@ function buildHolidayListItem(holiday: HolidayEntry): HolidayListItem {
     holiday.holiday_group,
     holiday.day_label,
     holiday.date,
-    gregorianDate,
     hebrewDate,
     holiday.open_time ?? "",
     holiday.close_time ?? "",
@@ -134,7 +138,6 @@ function buildHolidayListItem(holiday: HolidayEntry): HolidayListItem {
   return {
     holiday,
     name,
-    gregorianDate,
     hebrewDate,
     statusText,
     searchText,
@@ -194,13 +197,38 @@ export default function HolidaysPage() {
   }
 
   const holidayItems = useMemo(() => {
-    const year = new Date().getFullYear();
-    return holidays
-      .filter((holiday) => {
-        const holidayYear = Number(holiday.date.slice(0, 4));
-        return holidayYear === year || holidayYear === year + 1;
-      })
-      .sort(compareHolidaysByHebrewDate)
+    const today = getOperationalDate();
+    const rules = new Map<string, HolidayEntry>();
+
+    for (const rawHoliday of holidays) {
+      const holiday = withHebrewIdentity(rawHoliday);
+      if (isTechnicalHolidayAnchor(holiday)) {
+        continue;
+      }
+      const key = holidayRecurrenceKey(holiday);
+      const current = rules.get(key);
+      if (!current) {
+        rules.set(key, holiday);
+        continue;
+      }
+
+      const currentIsUpcoming = current.date >= today;
+      const candidateIsUpcoming = holiday.date >= today;
+      const candidateIsBetter =
+        (candidateIsUpcoming && !currentIsUpcoming) ||
+        (candidateIsUpcoming &&
+          currentIsUpcoming &&
+          holiday.date < current.date) ||
+        (!candidateIsUpcoming &&
+          !currentIsUpcoming &&
+          holiday.date > current.date);
+      if (candidateIsBetter) {
+        rules.set(key, holiday);
+      }
+    }
+
+    return [...rules.values()]
+      .sort(compareHolidayRulesByHebrewDate)
       .map(buildHolidayListItem);
   }, [holidays]);
 
@@ -272,7 +300,7 @@ export default function HolidaysPage() {
 
             return (
               <li
-                key={holiday.date}
+                key={holidayRecurrenceKey(holiday)}
                 className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${
                   isToday(holiday.date)
                     ? "border-teal-300 bg-teal-100/70"
@@ -299,8 +327,6 @@ export default function HolidaysPage() {
                   </p>
                   <p className="truncate text-sm text-teal-600">
                     {item.hebrewDate}
-                    {" · "}
-                    {item.gregorianDate}
                     {isToday(holiday.date) ? " · היום" : ""}
                     {" · "}
                     {holiday.day_label}

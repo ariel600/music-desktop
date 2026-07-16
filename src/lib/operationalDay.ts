@@ -1,11 +1,7 @@
-const DAY_END_HOUR = 2;
-
 export function getOperationalDate(now = new Date()): string {
-  const copy = new Date(now);
-  if (copy.getHours() < DAY_END_HOUR) {
-    copy.setDate(copy.getDate() - 1);
-  }
-  return toDateString(copy);
+  // Calendar-facing Gregorian dates change at civil midnight. Backend
+  // playback may still group post-midnight slots with the prior operating day.
+  return toDateString(now);
 }
 
 export function toDateString(date: Date): string {

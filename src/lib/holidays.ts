@@ -5,7 +5,8 @@ import {
   type OperatingHoursSettingsData,
   weekdayToOperatingDayId,
 } from "./operatingHours";
-import { getOperationalDate, parseDateString } from "./operationalDay";
+import { parseDateString } from "./operationalDay";
+import { getJerusalemHebrewDateString } from "./jerusalemDate";
 
 export type HolidayStatusKind = "חג" | "ערב חג" | "אחר";
 
@@ -28,7 +29,7 @@ export function formatHolidayDate(date: string): string {
 }
 
 export function isToday(date: string): boolean {
-  return date === getOperationalDate();
+  return date === getJerusalemHebrewDateString();
 }
 
 export function dayDisplayName(holiday: HolidayEntry): string {

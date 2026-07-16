@@ -69,7 +69,8 @@ fn is_within_music_window_now(app: &AppHandle) -> bool {
     let now = Local::now();
     let operational_date = crate::operational_day::operational_date_string(now);
     let weekday = crate::operational_day::operational_weekday(now);
-    let holiday = db.get_holiday_day(&operational_date).ok().flatten();
+    let hebrew_date = crate::operational_day::hebrew_date_string(now);
+    let holiday = db.get_holiday_day(&hebrew_date).ok().flatten();
     crate::music_schedule::is_in_music_window(
         now,
         &operational_date,

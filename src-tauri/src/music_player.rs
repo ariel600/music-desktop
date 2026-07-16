@@ -203,9 +203,9 @@ pub fn start(app: AppHandle) {
             let Ok(holidays) = holiday_service::get_holidays_list(&db) else {
                 continue;
             };
-            let op_date =
-                crate::operational_day::operational_date_string(chrono::Local::now());
-            let today_holiday = db.get_holiday_day(&op_date).ok().flatten();
+            let hebrew_date =
+                crate::operational_day::hebrew_date_string(chrono::Local::now());
+            let today_holiday = db.get_holiday_day(&hebrew_date).ok().flatten();
             let (in_window, decision) =
                 music_schedule::resolve_today(&holidays, &settings, today_holiday.as_ref());
             if !in_window || matches!(decision, MusicFolderDecision::Silence) {
@@ -250,12 +250,13 @@ pub fn start(app: AppHandle) {
                 }
             };
 
-            let op_date = crate::operational_day::operational_date_string(chrono::Local::now());
-            if holidays_loaded_for != op_date {
+            let now = chrono::Local::now();
+            let hebrew_date = crate::operational_day::hebrew_date_string(now);
+            if holidays_loaded_for != hebrew_date {
                 match holiday_service::get_holidays_list(&db) {
                     Ok(list) => {
                         holidays = list;
-                        holidays_loaded_for = op_date.clone();
+                        holidays_loaded_for = hebrew_date.clone();
                     }
                     Err(error) => {
                         tracing::warn!(
@@ -289,7 +290,7 @@ pub fn start(app: AppHandle) {
                 }
             };
 
-            let today_holiday = db.get_holiday_day(&op_date).ok().flatten();
+            let today_holiday = db.get_holiday_day(&hebrew_date).ok().flatten();
             let (in_window, decision) =
                 music_schedule::resolve_today(&holidays, &settings, today_holiday.as_ref());
 

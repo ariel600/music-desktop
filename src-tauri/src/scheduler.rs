@@ -35,9 +35,10 @@ async fn play_tasks(
     db: &DbState,
     tasks: Vec<crate::db::Task>,
     operational_date: &str,
+    hebrew_date: &str,
 ) -> Result<(), String> {
     let holiday = db
-        .get_holiday_day(operational_date)
+        .get_holiday_day(hebrew_date)
         .map_err(|error| error.to_string())?;
 
     for task in tasks {
@@ -140,6 +141,7 @@ async fn run_scheduler_tick(app: &AppHandle, lookback_minutes: i64) -> Result<()
     let now = Local::now();
     let operational_date = operational_day::operational_date_string(now);
     let weekday = operational_day::operational_weekday(now);
+    let hebrew_date = operational_day::hebrew_date_string(now);
 
     let db = db_from_app(app)?;
 
@@ -147,10 +149,15 @@ async fn run_scheduler_tick(app: &AppHandle, lookback_minutes: i64) -> Result<()
         .get_due_tasks(lookback_minutes, &operational_date, weekday)
         .map_err(|error| error.to_string())?;
 
-    play_tasks(&db, due_tasks, &operational_date).await?;
+    play_tasks(&db, due_tasks, &operational_date, &hebrew_date).await?;
 
     let due_system_messages = db
-        .get_due_system_messages(lookback_minutes, &operational_date, weekday)
+        .get_due_system_messages(
+            lookback_minutes,
+            &operational_date,
+            &hebrew_date,
+            weekday,
+        )
         .map_err(|error| error.to_string())?;
 
     play_system_messages(&db, due_system_messages, &operational_date).await?;
@@ -168,8 +175,10 @@ async fn check_missed_on_startup(app: &AppHandle) {
         }
     };
 
-    let operational_date = operational_day::operational_date_string(Local::now());
-    let holiday = db.get_holiday_day(&operational_date).ok().flatten();
+    let now = Local::now();
+    let operational_date = operational_day::operational_date_string(now);
+    let hebrew_date = operational_day::hebrew_date_string(now);
+    let holiday = db.get_holiday_day(&hebrew_date).ok().flatten();
 
     match db.get_missed_tasks(DUE_WINDOW_MINUTES) {
         Ok(missed) => {
