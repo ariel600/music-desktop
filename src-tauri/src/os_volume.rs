@@ -17,6 +17,9 @@ pub fn force_system_output_full() {
     if let Err(error) = set_system_output_level_inner(1.0) {
         tracing::warn!(target: "os_volume", "לא ניתן לדרוס את עוצמת המחשב: {error}");
     }
+    // Windows remembers per-app mixer mute/volume across runs; make sure our
+    // own session is audible even when the external-audio lock is not active.
+    ensure_own_session_audible();
 }
 
 fn log_os_volume_error(app: Option<&AppHandle>, detail: &str) {
@@ -225,6 +228,12 @@ mod win {
                     continue;
                 }
 
+                // Sessions with an unknown PID may actually be ours (or system
+                // sounds); never mute what we cannot identify.
+                if pid == 0 {
+                    continue;
+                }
+
                 if mute_others {
                     let _ = volume.SetMute(true, ptr::null());
                     let _ = volume.SetMasterVolume(0.0, ptr::null());
@@ -259,6 +268,50 @@ mod win {
             Err(last_error.unwrap_or_else(|| "לא ניתן לגשת לסשני השמע".into()))
         }
     }
+
+    /// Unmute only our own process's audio sessions, leaving all other apps
+    /// untouched. Windows persists per-app mixer mute across runs, so a stale
+    /// mute would otherwise silence us forever.
+    pub fn ensure_own_session_audible() {
+        ensure_com();
+        let our_pid = unsafe { GetCurrentProcessId() };
+
+        for role in [eConsole, eMultimedia] {
+            let Ok(device) = endpoint(role) else {
+                continue;
+            };
+            unsafe {
+                let Ok(session_manager) =
+                    device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)
+                else {
+                    continue;
+                };
+                let Ok(session_enumerator) = session_manager.GetSessionEnumerator() else {
+                    continue;
+                };
+                let Ok(count) = session_enumerator.GetCount() else {
+                    continue;
+                };
+
+                for index in 0..count {
+                    let Ok(session) = session_enumerator.GetSession(index) else {
+                        continue;
+                    };
+                    let Ok(session2) = session.cast::<IAudioSessionControl2>() else {
+                        continue;
+                    };
+                    if session2.GetProcessId().unwrap_or(0) != our_pid {
+                        continue;
+                    }
+                    let Ok(volume) = session.cast::<ISimpleAudioVolume>() else {
+                        continue;
+                    };
+                    let _ = volume.SetMute(false, ptr::null());
+                    let _ = volume.SetMasterVolume(1.0, ptr::null());
+                }
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -269,6 +322,20 @@ fn mute_external_sessions(mute: bool) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn set_system_output_level_inner(level: f32) -> Result<(), String> {
     win::set_system_output_level(level)
+}
+
+#[cfg(target_os = "windows")]
+fn ensure_own_session_audible() {
+    win::ensure_own_session_audible();
+}
+
+#[cfg(not(windows))]
+fn ensure_own_session_audible() {}
+
+/// Public hook for playback code: call right after opening an audio stream so
+/// a mixer mute remembered by the OS for our app cannot silence the new session.
+pub fn ensure_self_audible() {
+    ensure_own_session_audible();
 }
 
 #[cfg(target_os = "linux")]

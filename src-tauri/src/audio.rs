@@ -311,6 +311,9 @@ where
         .map_err(|e| format!("audio sink start failed: {e}"))?;
     sink.set_volume(volume.clamp(0.0, 1.0));
     sink.append(source);
+    // The OS session exists only after the stream opened; clear any remembered
+    // per-app mute now so this playback is actually audible.
+    crate::os_volume::ensure_self_audible();
     sink.sleep_until_end();
     Ok(())
 }
@@ -483,6 +486,7 @@ fn play_music_blocking(file_path: &str, volume: f32) -> Result<(), String> {
         });
     }
     crate::os_volume::on_music_started();
+    crate::os_volume::ensure_self_audible();
 
     loop {
         let finished = {
